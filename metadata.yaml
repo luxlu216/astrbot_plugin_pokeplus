@@ -1,0 +1,6 @@
+name: astrbot_plugin_pokeplus
+desc: 戳一戳全能响应：被戳后按概率回表情包/回戳/LLM回复（表情包=回戳≻LLM），支持聊天中AI自主戳一戳，群聊与私聊独立配置
+help: 被戳一戳时依次响应表情包、回戳、LLM；聊天过程中 AI 可自主选择戳一戳；所有功能均有开关与概率，群聊/私聊分别设置。
+version: v1.0.0
+author: luxlu216
+repo: https://github.com/luxlu216/astrbot_plugin_pokeplus

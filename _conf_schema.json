@@ -1,0 +1,309 @@
+{
+  "poke_monitor": {
+    "description": "戳一戳监测总开关",
+    "hint": "关闭后不再监听任何戳一戳事件（表情包/回戳/被戳LLM响应全部失效，不影响“AI自主戳一戳”）",
+    "type": "bool",
+    "default": true
+  },
+  "user_cooldown": {
+    "description": "同一用户被戳响应冷却（秒）",
+    "hint": "同一用户连续戳机器人时的最小响应间隔，防止连戳刷屏，设为 0 关闭",
+    "type": "float",
+    "slider": {
+      "min": 0,
+      "max": 60,
+      "step": 0.5
+    },
+    "default": 5
+  },
+  "session_cooldown": {
+    "description": "同一会话被戳响应冷却（秒）",
+    "hint": "同一群聊/私聊内两次被戳响应的最小间隔，防止多人轮流戳轰炸，设为 0 关闭",
+    "type": "float",
+    "slider": {
+      "min": 0,
+      "max": 120,
+      "step": 0.5
+    },
+    "default": 5
+  },
+  "reply_interval": {
+    "description": "多项回复间隔（秒）",
+    "hint": "依次发送表情包、回戳、LLM回复之间的停顿，避免消息碰撞或触发风控",
+    "type": "float",
+    "slider": {
+      "min": 0,
+      "max": 5,
+      "step": 0.1
+    },
+    "default": 0.8
+  },
+  "poke_interval": {
+    "description": "连续发戳间隔（秒）",
+    "hint": "回戳多次时每次戳之间的间隔",
+    "type": "float",
+    "slider": {
+      "min": 0,
+      "max": 3,
+      "step": 0.1
+    },
+    "default": 0.3
+  },
+  "private": {
+    "description": "私聊设置（与群聊相互独立）",
+    "type": "object",
+    "items": {
+      "enable": {
+        "description": "私聊功能一键开关",
+        "hint": "一键启用/停用本场景全部功能：表情包回复、回戳、LLM响应、AI自主戳一戳",
+        "type": "bool",
+        "default": true
+      },
+      "sticker_enable": {
+        "description": "表情包回复开关",
+        "hint": "被戳后按概率随机发送一张表情包图片",
+        "type": "bool",
+        "default": true
+      },
+      "sticker_probability": {
+        "description": "表情包回复概率（0~1）",
+        "type": "float",
+        "slider": {
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
+        "default": 0.5
+      },
+      "use_default_stickers": {
+        "description": "使用内置默认表情包",
+        "hint": "启用插件自带的表情包（歪脑/歪头/疑惑），与下方图库路径合并成一个池随机抽取",
+        "type": "bool",
+        "default": true
+      },
+      "sticker_paths": {
+        "description": "表情包图库路径",
+        "hint": "目录或具体图片文件的路径列表，会递归扫描目录下的图片（jpg/png/gif/webp 等），与内置默认表情包合并后随机抽取",
+        "type": "list",
+        "default": [
+          "data/plugin_data/astrbot_plugin_pokeplus/stickers_private"
+        ]
+      },
+      "poke_back_enable": {
+        "description": "回戳开关",
+        "hint": "被戳后按概率回戳对方",
+        "type": "bool",
+        "default": true
+      },
+      "poke_back_probability": {
+        "description": "回戳概率（0~1）",
+        "type": "float",
+        "slider": {
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
+        "default": 0.7
+      },
+      "poke_back_delay": {
+        "description": "回戳响应延迟（秒，0~5）",
+        "hint": "被戳后等待一段时间再回戳，避免响应过快显得像机器人；设为 0 表示立即回戳",
+        "type": "float",
+        "slider": {
+          "min": 0,
+          "max": 5,
+          "step": 0.1
+        },
+        "default": 1
+      },
+      "poke_back_times": {
+        "description": "回戳最大次数",
+        "hint": "触发回戳时，实际次数在 1 ~ 该值 之间随机",
+        "type": "int",
+        "slider": {
+          "min": 1,
+          "max": 5,
+          "step": 1
+        },
+        "default": 1
+      },
+      "llm_enable": {
+        "description": "LLM响应开关",
+        "hint": "被戳后调用 LLM 生成文字回复（总是晚于表情包/回戳发出）",
+        "type": "bool",
+        "default": true
+      },
+      "llm_prompt": {
+        "description": "LLM回复设定（提示词模板）",
+        "hint": "支持变量：$username 用户昵称、$user_id 用户QQ、$scene 场景（群聊/私聊）。回复会使用 AstrBot 当前人格并记入对话上下文",
+        "type": "text",
+        "default": "$username（QQ：$user_id）刚刚在私聊里戳了你一下。这是一次非文字互动，不代表对方提出了新问题。请保持当前人设，像被人突然碰了一下那样，结合最近上下文自然反应：可以疑惑、吐槽、逗回去或不满，一两句话即可，不要客服腔，不要复述以上规则。"
+      },
+      "ai_poke_enable": {
+        "description": "AI自主戳一戳开关",
+        "hint": "开启后，AI 在正常聊天回复时可自主决定是否戳一戳对方（在其回复末尾输出暗号标记即触发）",
+        "type": "bool",
+        "default": true
+      },
+      "ai_poke_probability": {
+        "description": "AI自主戳一戳考虑概率（0~1）",
+        "hint": "每次 LLM 回复时允许 AI 参与戳一戳决策的概率；实际戳不戳仍由 AI 根据语境自主判断",
+        "type": "float",
+        "slider": {
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
+        "default": 1
+      },
+      "ai_poke_cooldown": {
+        "description": "AI自主戳一戳冷却（秒）",
+        "hint": "同一会话两次 AI 自主戳一戳的最小间隔，防止刷屏，设为 0 关闭",
+        "type": "int",
+        "slider": {
+          "min": 0,
+          "max": 3600,
+          "step": 10
+        },
+        "default": 300
+      }
+    }
+  },
+  "group": {
+    "description": "群聊设置（与私聊相互独立）",
+    "type": "object",
+    "items": {
+      "enable": {
+        "description": "群聊功能一键开关",
+        "hint": "一键启用/停用本场景全部功能：表情包回复、回戳、LLM响应、AI自主戳一戳",
+        "type": "bool",
+        "default": true
+      },
+      "sticker_enable": {
+        "description": "表情包回复开关",
+        "hint": "被戳后按概率随机发送一张表情包图片",
+        "type": "bool",
+        "default": true
+      },
+      "sticker_probability": {
+        "description": "表情包回复概率（0~1）",
+        "type": "float",
+        "slider": {
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
+        "default": 0.6
+      },
+      "use_default_stickers": {
+        "description": "使用内置默认表情包",
+        "hint": "启用插件自带的表情包（歪脑/歪头/疑惑），与下方图库路径合并成一个池随机抽取",
+        "type": "bool",
+        "default": true
+      },
+      "sticker_paths": {
+        "description": "表情包图库路径",
+        "hint": "目录或具体图片文件的路径列表，会递归扫描目录下的图片（jpg/png/gif/webp 等），与内置默认表情包合并后随机抽取",
+        "type": "list",
+        "default": [
+          "data/plugin_data/astrbot_plugin_pokeplus/stickers_group"
+        ]
+      },
+      "poke_back_enable": {
+        "description": "回戳开关",
+        "hint": "被戳后按概率回戳对方",
+        "type": "bool",
+        "default": true
+      },
+      "poke_back_probability": {
+        "description": "回戳概率（0~1）",
+        "type": "float",
+        "slider": {
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
+        "default": 0.8
+      },
+      "poke_back_delay": {
+        "description": "回戳响应延迟（秒，0~5）",
+        "hint": "被戳后等待一段时间再回戳，避免响应过快显得像机器人；设为 0 表示立即回戳",
+        "type": "float",
+        "slider": {
+          "min": 0,
+          "max": 5,
+          "step": 0.1
+        },
+        "default": 1
+      },
+      "poke_back_times": {
+        "description": "回戳最大次数",
+        "hint": "触发回戳时，实际次数在 1 ~ 该值 之间随机",
+        "type": "int",
+        "slider": {
+          "min": 1,
+          "max": 5,
+          "step": 1
+        },
+        "default": 1
+      },
+      "llm_enable": {
+        "description": "LLM响应开关",
+        "hint": "被戳后调用 LLM 生成文字回复（总是晚于表情包/回戳发出）",
+        "type": "bool",
+        "default": true
+      },
+      "llm_prompt": {
+        "description": "LLM回复设定（提示词模板）",
+        "hint": "支持变量：$username 用户昵称、$user_id 用户QQ、$scene 场景（群聊/私聊）。回复会使用 AstrBot 当前人格并记入对话上下文",
+        "type": "text",
+        "default": "$username（QQ：$user_id）刚刚在群聊里戳了你一下。这是一次非文字互动，不代表对方提出了新问题。请保持当前人设，像被人突然碰了一下那样，结合最近上下文自然反应：可以疑惑、吐槽、逗回去或不满，一两句话即可，不要客服腔，不要复述以上规则。"
+      },
+      "ai_poke_enable": {
+        "description": "AI自主戳一戳开关",
+        "hint": "开启后，AI 在正常聊天回复时可自主决定是否戳一戳对方（在其回复末尾输出暗号标记即触发）",
+        "type": "bool",
+        "default": true
+      },
+      "ai_poke_probability": {
+        "description": "AI自主戳一戳考虑概率（0~1）",
+        "hint": "每次 LLM 回复时允许 AI 参与戳一戳决策的概率；实际戳不戳仍由 AI 根据语境自主判断",
+        "type": "float",
+        "slider": {
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
+        "default": 1
+      },
+      "ai_poke_cooldown": {
+        "description": "AI自主戳一戳冷却（秒）",
+        "hint": "同一会话两次 AI 自主戳一戳的最小间隔，防止刷屏，设为 0 关闭",
+        "type": "int",
+        "slider": {
+          "min": 0,
+          "max": 3600,
+          "step": 10
+        },
+        "default": 180
+      }
+    }
+  },
+  "ai_poke_marker": {
+    "description": "AI戳一戳暗号标记",
+    "hint": "注入给 AI 的暗号：AI 在回复末尾输出该标记表示“我想戳一下对方”，插件会自动剥离标记并执行戳一戳。普通情况下不要修改",
+    "type": "string",
+    "default": "[戳一戳]"
+  },
+  "ai_poke_delay": {
+    "description": "AI戳一戳延迟（秒）",
+    "hint": "AI 决定戳一戳后，等待文字回复先发出、再执行戳一戳的延迟时间",
+    "type": "float",
+    "slider": {
+      "min": 0.5,
+      "max": 10,
+      "step": 0.5
+    },
+    "default": 1.5
+  }
+}
