@@ -1,6 +1,5 @@
 # astrbot_plugin_pokeplus（戳一戳全能响应）
 
-整合重写自以下三个插件，取长补短：
 
 
 
