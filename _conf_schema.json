@@ -320,6 +320,40 @@
         "hint": "有人戳主人时给 AI 的提示词。支持变量：$username 戳人者昵称、$user_id 戳人者QQ号",
         "type": "text",
         "default": "$username（QQ：$user_id）刚刚在群里戳了主人你一下。请像贴身护短的闺蜜/保镖那样替主人出头回应：可以凶对方、护短、调侃，比如「你戳什么戳」「再戳试试」这种口吻，一两句话，口语化，不要客服腔，不要复述本段规则。"
+      },
+      "watch_all_enable": {
+        "description": "全局吃瓜监测开关",
+        "hint": "监测群内所有戳一戳（谁戳谁都看得到：主人戳别人、别人互戳等），不涉及机器人与主人时按概率交给 AI 决定是否凑热闹（戳发起者/戳被戳者/起哄短评/不回应）；机器人被戳与护主走各自的专属流程",
+        "type": "bool",
+        "default": true
+      },
+      "watch_all_probability": {
+        "description": "吃瓜评估概率（0~1）",
+        "hint": "每次无关互戳交给 AI 判断的概率，控制 LLM 调用频率；AI 还可通过 [不回应] 自行放弃",
+        "type": "float",
+        "slider": {
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
+        "default": 0.5
+      },
+      "watch_all_cooldown": {
+        "description": "吃瓜冷却（秒）",
+        "hint": "同一群两次凑热闹评估的最小间隔，防止活跃群被戳一戳刷爆 LLM，设为 0 关闭",
+        "type": "int",
+        "slider": {
+          "min": 0,
+          "max": 600,
+          "step": 10
+        },
+        "default": 60
+      },
+      "watch_all_prompt": {
+        "description": "吃瓜判断提示词模板",
+        "hint": "支持变量：$poker_name/$poker_id 发起者、$target_name/$target_id 被戳者、$note 关系说明（主人主动去戳人了/普通群友互戳）。暗号：[戳发起] [戳被戳] [起哄]短评 [不回应]",
+        "type": "text",
+        "default": "群里的戳一戳播报：$poker_name（QQ：$poker_id）刚刚戳了 $target_name（QQ：$target_id）一下（$note）。像爱看热闹的群友那样决定要不要凑热闹：输出 [戳发起] 表示帮着戳一下发起者；输出 [戳被戳] 表示也去戳一下被戳的人；想说话就写 [起哄] 后面跟一句不超过40字的短评。觉得没意思就只输出 [不回应]。最多选一种戳、可配一句短评，不要全部都用。"
       }
     }
   },

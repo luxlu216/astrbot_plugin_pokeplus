@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from astrbot.core.config import AstrBotConfig
     from astrbot.core.provider.entities import LLMResponse, ProviderRequest
 
-VERSION = "v1.1.0"
+VERSION = "v1.2.0"
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 CLEANUP_THRESHOLD = 500
@@ -65,6 +65,23 @@ AI_POKE_INSTRUCTION = """
 
 # AI 只输出了标记、没有正文时的兜底文本
 AI_POKE_FALLBACK_TEXT = "（戳了戳你）"
+
+# 全局吃瓜监测的暗号标记 (AI 在回复中输出, 插件剥离并执行)
+WATCH_POKE_A = "[戳发起]"   # 帮着戳一下发起者
+WATCH_POKE_B = "[戳被戳]"   # 也去戳一下被戳的人
+WATCH_COMMENT = "[起哄]"    # 后跟一句短评
+WATCH_PASS = "[不回应]"     # 不凑热闹
+
+# 全局吃瓜监测的默认提示词 (支持 $poker_name/$poker_id/$target_name/$target_id/$note)
+DEFAULT_WATCH_PROMPT = (
+    "群里的戳一戳播报：$poker_name（QQ：$poker_id）刚刚戳了 "
+    "$target_name（QQ：$target_id）一下（$note）。"
+    "像爱看热闹的群友那样决定要不要凑热闹：输出 " + WATCH_POKE_A +
+    " 表示帮着戳一下发起者；输出 " + WATCH_POKE_B +
+    " 表示也去戳一下被戳的人；想说话就写 " + WATCH_COMMENT +
+    " 后面跟一句不超过40字的短评。觉得没意思就只输出 " + WATCH_PASS +
+    "。最多选一种戳、可配一句短评，不要全部都用。"
+)
 
 
 @register(
@@ -193,18 +210,21 @@ class PokePlusPlugin(Star):
         poker_id, target_id, group_id = parsed
         self_id = self._self_id(event)
 
-        # 分发: 戳机器人自己 → 被戳响应; 群聊里戳主人 → 护主监测
+        # 分发: 戳机器人自己 → 被戳响应; 群聊里戳主人 → 护主监测;
+        # 群聊其他互戳(主人戳别人/别人互戳) → 全局吃瓜监测
         if not self_id or not poker_id or poker_id == self_id:
             return
         if target_id != self_id:
-            if (
-                group_id
-                and poker_id != target_id
-                and target_id in self._owner_ids()
-            ):
-                async for _ in self._handle_owner_poked(event, poker_id, group_id):
-                    yield _
-            return  # 其余(机器人戳别人/别人互戳)一律忽略
+            if group_id and poker_id != target_id:
+                if target_id in self._owner_ids():
+                    async for _ in self._handle_owner_poked(event, poker_id, group_id):
+                        yield _
+                else:
+                    async for _ in self._handle_watch_all_poke(
+                        event, poker_id, target_id, group_id,
+                    ):
+                        yield _
+            return  # 机器人戳别人的回声事件不处理
 
         cfg = self._section(event)
         # 场景一键开关: 关闭后该场景(群聊/私聊)全部功能停用
@@ -355,6 +375,135 @@ class PokePlusPlugin(Star):
 
         if did_respond and not llm_requested:
             event.stop_event()
+
+    # ============================ 全局吃瓜监测 ============================
+
+    async def _handle_watch_all_poke(self, event: AstrMessageEvent,
+                                     poker_id: str, target_id: str, group_id: str):
+        """群内与机器人/主人无关的互戳: 按概率交给 AI 决定是否凑热闹"""
+        cfg = self._section(event)
+        if not cfg.get("enable", True) or not cfg.get("watch_all_enable", True):
+            return
+        if random.random() >= self._clamp01(cfg.get("watch_all_probability", 0.5)):
+            return
+        umo = event.unified_msg_origin
+        now = time.monotonic()
+        cd = self._clamp_float(cfg.get("watch_all_cooldown", 60))
+        if cd > 0 and now - self._session_cd.get("wa:" + umo, 0) < cd:
+            return
+        self._session_cd["wa:" + umo] = now
+        if len(self._user_cd) + len(self._session_cd) > CLEANUP_THRESHOLD:
+            self._cleanup_cooldowns(now)
+
+        poker_name = event.get_sender_name() or poker_id
+        target_name = await self._member_name(event, group_id, target_id)
+        note = (
+            "主人主动去戳人了" if poker_id in self._owner_ids() else "普通群友互戳"
+        )
+        prompt = Template(
+            cfg.get("watch_all_prompt") or DEFAULT_WATCH_PROMPT
+        ).safe_substitute(
+            poker_name=poker_name, poker_id=poker_id,
+            target_name=target_name, target_id=target_id, note=note,
+        )
+        # 标记 pokeplus_triggered: 避免这次 LLM 请求再叠加"AI自主戳一戳"
+        event.set_extra("pokeplus_triggered", True)
+        event.set_extra("pokeplus_watch_a", poker_id)
+        event.set_extra("pokeplus_watch_b", target_id)
+        event.set_extra("pokeplus_watch_group", group_id)
+        conversation = await self._get_conversation(event)
+        yield event.request_llm(prompt=prompt, conversation=conversation)
+
+    async def _member_name(self, event: AstrMessageEvent,
+                           group_id: str, user_id: str) -> str:
+        """查群成员名片, 失败回退 QQ号"""
+        client = getattr(event, "bot", None)
+        if client is not None:
+            try:
+                info = await asyncio.wait_for(
+                    client.call_action(
+                        "get_group_member_info",
+                        group_id=int(group_id), user_id=int(user_id),
+                    ),
+                    timeout=5,
+                )
+                name = str(
+                    (info or {}).get("card") or (info or {}).get("nickname") or ""
+                ).strip()
+                if name:
+                    return name
+            except Exception:
+                pass
+        return f"QQ:{user_id}"
+
+    @filter.on_llm_response()
+    async def handle_watch_choice(self, event: AstrMessageEvent, resp: LLMResponse):
+        """全局吃瓜: 解析凑热闹暗号, 剥离标记并延迟执行跟戳"""
+        if not event.get_extra("pokeplus_watch_a"):
+            return
+        try:
+            text = getattr(resp, "completion_text", None) or ""
+            if WATCH_PASS in text:
+                resp.completion_text = ""
+                chain = getattr(resp, "result_chain", None)
+                if chain is not None:
+                    for comp in getattr(chain, "chain", None) or []:
+                        if isinstance(comp, Plain):
+                            comp.text = ""
+                logger.info("[pokeplus] 全局吃瓜: AI 决定不凑热闹")
+                return
+
+            want_a = WATCH_POKE_A in text
+            want_b = WATCH_POKE_B in text
+            cleaned = text
+            for m in (WATCH_POKE_A, WATCH_POKE_B, WATCH_COMMENT, WATCH_PASS):
+                cleaned = cleaned.replace(m, "")
+            cleaned = re.sub(r"\s+", " ", cleaned).strip()[:80]
+            resp.completion_text = cleaned
+            chain = getattr(resp, "result_chain", None)
+            if chain is not None:
+                for comp in getattr(chain, "chain", None) or []:
+                    if isinstance(comp, Plain) and comp.text:
+                        t = comp.text
+                        for m in (WATCH_POKE_A, WATCH_POKE_B, WATCH_COMMENT, WATCH_PASS):
+                            t = t.replace(m, "")
+                        comp.text = re.sub(r"\s+", " ", t).strip() or comp.text
+
+            if not want_a and not want_b:
+                return
+            client = getattr(event, "bot", None)
+            group_id = event.get_extra("pokeplus_watch_group")
+            targets = []
+            a = event.get_extra("pokeplus_watch_a")
+            b = event.get_extra("pokeplus_watch_b")
+            if want_a and a:
+                targets.append(str(a))
+            if want_b and b:
+                targets.append(str(b))
+            if not targets or client is None or not group_id:
+                return
+            delay = random.uniform(0.8, 2.0)
+            task = asyncio.create_task(
+                self._delayed_watch_poke(client, targets, group_id, delay)
+            )
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
+        except Exception:
+            logger.warning("[pokeplus] 全局吃瓜处理失败", exc_info=True)
+
+    async def _delayed_watch_poke(self, client, targets: list[str],
+                                  group_id: str, delay: float):
+        """延迟执行凑热闹跟戳, 保证戳的动作出现在文字回复之后"""
+        try:
+            await asyncio.sleep(delay)
+            for t in targets:
+                if await self._poke_client(client, t, group_id, 1):
+                    logger.info(f"[pokeplus] 凑热闹戳了 {t} (群{group_id})")
+                await asyncio.sleep(self._global_float("poke_interval", 0.3))
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.warning("[pokeplus] 凑热闹跟戳发送失败", exc_info=True)
 
     # ============================ AI 自主戳一戳 ============================
 
