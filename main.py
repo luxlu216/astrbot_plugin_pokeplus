@@ -400,6 +400,9 @@ class PokePlusPlugin(Star):
         note = (
             "主人主动去戳人了" if poker_id in self._owner_ids() else "普通群友互戳"
         )
+        # ---- AI 凑热闹 (与其他流程一致, 受 llm_enable 总闸控制) ----
+        if not cfg.get("llm_enable", True):
+            return
         prompt = Template(
             cfg.get("watch_all_prompt") or DEFAULT_WATCH_PROMPT
         ).safe_substitute(
