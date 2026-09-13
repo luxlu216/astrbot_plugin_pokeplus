@@ -15,6 +15,7 @@ astrbot_plugin_pokeplus —— 戳一戳全能响应插件
    (先发送表情包/执行回戳, 之后才进行 LLM 响应)
 6. 聊天过程中 AI 自主选择是否戳一戳(带开关)
 7. 群聊与私聊分别独立配置
+8. 群聊护主监测: 有人戳主人时, 机器人跟戳对方并让 AI 替主人出头回应
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import os
 import random
+import re
 import time
 from string import Template
 from typing import TYPE_CHECKING, Any
@@ -35,7 +37,7 @@ if TYPE_CHECKING:
     from astrbot.core.config import AstrBotConfig
     from astrbot.core.provider.entities import LLMResponse, ProviderRequest
 
-VERSION = "v1.0.0"
+VERSION = "v1.1.0"
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 CLEANUP_THRESHOLD = 500
@@ -191,11 +193,18 @@ class PokePlusPlugin(Star):
         poker_id, target_id, group_id = parsed
         self_id = self._self_id(event)
 
-        # 只响应"戳机器人自己", 忽略机器人戳别人/别人互戳
-        if not self_id or target_id != self_id:
+        # 分发: 戳机器人自己 → 被戳响应; 群聊里戳主人 → 护主监测
+        if not self_id or not poker_id or poker_id == self_id:
             return
-        if not poker_id or poker_id == self_id:
-            return
+        if target_id != self_id:
+            if (
+                group_id
+                and poker_id != target_id
+                and target_id in self._owner_ids()
+            ):
+                async for _ in self._handle_owner_poked(event, poker_id, group_id):
+                    yield _
+            return  # 其余(机器人戳别人/别人互戳)一律忽略
 
         cfg = self._section(event)
         # 场景一键开关: 关闭后该场景(群聊/私聊)全部功能停用
@@ -275,6 +284,75 @@ class PokePlusPlugin(Star):
 
         # 未走 LLM 链路时终止事件传播, 避免其他插件重复响应同一次戳一戳;
         # 走了 LLM 链路时不 stop(与 poke_to_llm 一致, 防止中断请求)
+        if did_respond and not llm_requested:
+            event.stop_event()
+
+    # ============================ 群聊护主监测 ============================
+
+    def _owner_ids(self) -> set[str]:
+        """主人QQ集合: 配置的 owner_qq(逗号分隔) 优先, 留空回退 AstrBot 管理员列表"""
+        raw = str(self.config.get("owner_qq") or "").strip()
+        ids = {x.strip() for x in re.split(r"[,，\s]+", raw) if x.strip().isdigit()}
+        if not ids:
+            try:
+                admins = (self.context.get_config() or {}).get("admins_id") or []
+                ids = {str(a).strip() for a in admins if str(a).strip()}
+            except Exception:
+                ids = set()
+        return ids
+
+    async def _handle_owner_poked(self, event: AstrMessageEvent,
+                                  poker_id: str, group_id: str):
+        """群聊里有人戳主人: 按概率跟戳对方 + AI 替主人出头回应"""
+        cfg = self._section(event)
+        if not cfg.get("enable", True) or not cfg.get("watch_owner_enable", True):
+            return
+
+        # 冷却(与"被戳机器人"冷却分开计数, 键加前缀)
+        now = time.monotonic()
+        user_cd = self._global_float("user_cooldown", 5.0)
+        session_cd = self._global_float("session_cooldown", 5.0)
+        if user_cd > 0 and now - self._user_cd.get("o" + poker_id, 0) < user_cd:
+            return
+        umo = event.unified_msg_origin
+        if session_cd > 0 and now - self._session_cd.get(umo + ":o", 0) < session_cd:
+            return
+        self._user_cd["o" + poker_id] = now
+        self._session_cd[umo + ":o"] = now
+        if len(self._user_cd) + len(self._session_cd) > CLEANUP_THRESHOLD:
+            self._cleanup_cooldowns(now)
+
+        username = event.get_sender_name() or poker_id
+        logger.info(f"[pokeplus] 主人被戳: {username}({poker_id}) 群{group_id}")
+        did_respond = False
+        llm_requested = False
+
+        # ---- 跟戳: 替主人戳回去 (复用回戳的延迟/次数手感) ----
+        prob = self._clamp01(cfg.get("watch_owner_poke_probability", 0.8))
+        if random.random() < prob:
+            delay = min(5.0, self._clamp_float(cfg.get("poke_back_delay", 1.0)))
+            if delay > 0:
+                await asyncio.sleep(delay)
+            times = random.randint(1, max(1, int(cfg.get("poke_back_times", 1) or 1)))
+            if await self._poke_user(event, poker_id, group_id, times):
+                did_respond = True
+
+        # ---- AI 替主人出头 (走标准 LLM 链路, 使用当前人设) ----
+        if cfg.get("llm_enable", True) and random.random() < self._clamp01(
+            cfg.get("watch_owner_reply_probability", 1.0)
+        ):
+            template = (cfg.get("watch_owner_prompt") or "").strip()
+            if template:
+                if did_respond:
+                    await asyncio.sleep(self._global_float("reply_interval", 0.8))
+                event.set_extra("pokeplus_triggered", True)
+                prompt = Template(template).safe_substitute(
+                    username=username, user_id=poker_id
+                )
+                conversation = await self._get_conversation(event)
+                yield event.request_llm(prompt=prompt, conversation=conversation)
+                llm_requested = True
+
         if did_respond and not llm_requested:
             event.stop_event()
 

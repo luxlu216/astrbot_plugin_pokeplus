@@ -10,6 +10,7 @@
 - **回戳**：开关 + 概率（0~1），可配置最大回戳次数（实际 1~该值 随机）。
 - **LLM 响应**：开关 + 回复设定（提示词模板，支持 `$username` / `$user_id` / `$scene` 变量），走 AstrBot 标准 LLM 链路，自动使用当前人格并记入对话上下文。
 - **AI 自主戳一戳**：正常聊天时，AI 可根据语境自主决定是否在回复后戳一戳对方；带开关、考虑概率和冷却。
+- **群聊护主监测**：群里有人戳**主人**时，机器人按概率替主人跟戳对方，并让 AI 以护短口吻替主人出头回应（如「你戳什么戳，这是我老婆」）；主人 QQ 通过 `owner_qq` 配置（多个用逗号分隔），留空自动使用 AstrBot 管理员列表。带一键开关、跟戳概率、回复概率和独立提示词模板。
 - **群聊 / 私聊独立配置**：以上所有功能在群聊和私聊中各有独立的一套配置。
 
 ## 回复优先级（核心规则）
@@ -79,3 +80,7 @@
 | `ai_poke_enable` / `ai_poke_probability` / `ai_poke_cooldown` | AI 自主戳开关 / 考虑概率 / 冷却（秒） | 开 / 1 / 群180 私300 |
 | `ai_poke_marker` | AI 戳一戳暗号标记 | `[戳一戳]` |
 | `ai_poke_delay` | AI 戳一戳延迟（秒） | 1.5 |
+| `owner_qq` | 主人QQ号（多个逗号分隔；留空用管理员列表） | 空 |
+| `group.watch_owner_enable` | 群聊护主监测开关（有人戳主人→跟戳+AI出头） | 开 |
+| `group.watch_owner_poke_probability` / `watch_owner_reply_probability` | 护主跟戳概率 / 护主回复概率 | 0.8 / 1 |
+| `group.watch_owner_prompt` | 护主回复提示词模板（$username/$user_id） | 见配置 |
